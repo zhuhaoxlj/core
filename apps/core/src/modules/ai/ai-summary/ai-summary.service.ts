@@ -143,6 +143,12 @@ export class AiSummaryService {
 
         const contentMd5 = md5(text)
 
+        // 先删除该文章的所有旧摘要记录，确保AI-摘要页面显示最新的摘要
+        await this.aiSummaryModel.deleteMany({
+          refId: id,
+          lang,
+        })
+
         const doc = await this.aiSummaryModel.create({
           hash: contentMd5,
           lang,
@@ -153,7 +159,10 @@ export class AiSummaryService {
         // 如果是文章类型，自动更新文章的summary字段
         if (article && article.type === CollectionRefTypes.Post) {
           try {
-            await this.postService.updateById(id, { summary })
+            await this.postService.updateById(id, {
+              summary,
+              _ai_summary_update: true, // 添加标记，表明这是AI摘要更新
+            } as any)
             this.logger.log(`Updated post summary for article ${id}`)
           } catch (error) {
             this.logger.error(`Failed to update post summary: ${error.message}`)
@@ -305,5 +314,58 @@ export class AiSummaryService {
 
     // 不需要再次更新，因为已经在generateSummaryByOpenAI方法中更新了
     return aiSummary
+  }
+
+  @OnEvent(BusinessEvents.POST_UPDATE)
+  @OnEvent(BusinessEvents.NOTE_UPDATE)
+  async handleUpdateArticle(event: any) {
+    // 检查是否启用了自动生成摘要
+    const enableAutoGenerate = await this.configService
+      .get('ai')
+      .then((c) => c.enableAutoGenerateSummary && c.enableSummary)
+    if (!enableAutoGenerate) {
+      return
+    }
+
+    // 添加防止循环触发的机制
+    // 1. 从Redis获取锁，检查是否正在处理该文章的摘要
+    const lockKey = `ai:summary:lock:${event.id}`
+    const redis = this.redisService.getClient()
+    const isLocked = await redis.get(lockKey)
+
+    if (isLocked) {
+      this.logger.log(
+        `Skipping summary generation for article ${event.id} - already being processed`,
+      )
+      return
+    }
+
+    // 2. 如果是我们自己更新的summary字段，跳过处理
+    // 检查更新是否只包含summary字段或由AI摘要更新触发
+    if (event._ai_summary_update) {
+      this.logger.log(
+        `Skipping summary generation for article ${event.id} - triggered by AI summary update`,
+      )
+      return
+    }
+
+    // 3. 设置锁，防止重复处理
+    await redis.set(lockKey, '1', 'EX', 30) // 30秒锁，防止死锁
+
+    try {
+      this.logger.log(`Regenerating summary for updated article ${event.id}`)
+
+      const targetLanguage = await this.configService
+        .get('ai')
+        .then((c) => c.aiSummaryTargetLanguage)
+
+      await this.generateSummaryByOpenAI(
+        event.id,
+        targetLanguage === 'auto' ? DEFAULT_SUMMARY_LANG : targetLanguage,
+      )
+    } finally {
+      // 释放锁
+      await redis.del(lockKey)
+    }
   }
 }

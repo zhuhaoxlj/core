@@ -302,6 +302,8 @@ export class PostService {
             {
               ...doc,
               text: await this.textMacroService.replaceTextMacro(doc.text, doc),
+              // 如果是AI摘要更新，传递标记
+              _ai_summary_update: (updatedData as any)._ai_summary_update,
             },
             {
               scope: EventScope.TO_VISITOR,
@@ -311,9 +313,17 @@ export class PostService {
             },
           ),
         doc &&
-          this.eventManager.broadcast(BusinessEvents.POST_UPDATE, doc, {
-            scope: EventScope.TO_SYSTEM,
-          }),
+          this.eventManager.broadcast(
+            BusinessEvents.POST_UPDATE,
+            {
+              ...doc,
+              // 如果是AI摘要更新，传递标记
+              _ai_summary_update: (updatedData as any)._ai_summary_update,
+            },
+            {
+              scope: EventScope.TO_SYSTEM,
+            },
+          ),
       ])
     },
     1000,
