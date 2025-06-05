@@ -254,6 +254,23 @@ export class AiSummaryService {
 
     doc.summary = summary
     await doc.save()
+
+    // 获取文章信息，并更新文章的summary字段
+    const article = await this.databaseService.findGlobalById(doc.refId)
+    if (article && article.type === CollectionRefTypes.Post) {
+      try {
+        await this.postService.updateById(doc.refId, {
+          summary,
+          _ai_summary_update: true, // 添加标记，表明这是AI摘要更新
+        } as any)
+        this.logger.log(
+          `Updated post summary for article ${doc.refId} from AI summary edit`,
+        )
+      } catch (error) {
+        this.logger.error(`Failed to update post summary: ${error.message}`)
+      }
+    }
+
     return doc
   }
   async getSummaryByArticleId(articleId: string, lang = DEFAULT_SUMMARY_LANG) {
