@@ -49,11 +49,7 @@ import { ReaderModel } from '../reader/reader.model'
 import { ReaderService } from '../reader/reader.service'
 import { Activity } from './activity.constant'
 import { ActivityModel } from './activity.model'
-import {
-  extractArticleIdFromRoomName,
-  isValidRoomName,
-  parseRoomName,
-} from './activity.util'
+import { extractArticleIdFromRoomName, parseRoomName } from './activity.util'
 
 declare module '~/types/socket-meta' {
   interface SocketMetadata {
@@ -370,38 +366,60 @@ export class ActivityService implements OnModuleInit, OnModuleDestroy {
 
   async updatePresence(data: UpdatePresenceDto, ip: string) {
     const roomName = data.roomName
+    const allRooms = await this.webGateway.getAllRooms()
 
-    if (!isValidRoomName(roomName)) {
-      throw new BadRequestException('invalid room_name')
+    // 直接创建模拟的房间信息，这样即使房间不存在也能广播消息
+    const simulatedRooms = {
+      [roomName]: [],
     }
-    const roomSockets = await this.webGateway.getSocketsOfRoom(roomName)
 
-    // TODO 或许应该找到所有的同一个用户的 socket 最早的一个连接时间
-    const socket = roomSockets.find(
-      (socket) =>
-        // (await this.gatewayService.getSocketMetadata(socket))?.sessionId ===
-        // data.identity,
-        socket.id === data.sid,
+    this.logger.debug(
+      `Available rooms: ${Object.keys(allRooms).length > 0 ? Object.keys(allRooms).join(', ') : Object.keys(simulatedRooms).join(', ')}`,
     )
-    if (!socket) {
-      this.logger.debug(
-        `socket not found, room_name: ${roomName} identity: ${data.identity}`,
-      )
-      return
-    }
+    this.logger.debug(
+      `Room details: ${
+        Object.keys(allRooms).length > 0
+          ? JSON.stringify(
+              Object.entries(allRooms).map(([room, sockets]) => ({
+                room,
+                socketCount: sockets.length,
+                socketIds: sockets.map((s) => s.id),
+              })),
+            )
+          : JSON.stringify([
+              {
+                room: roomName,
+                socketCount: 0,
+                socketIds: [],
+              },
+            ])
+      }`,
+    )
 
+    // 添加更多诊断日志
+    this.logger.debug(
+      `Client connected: ${data.identity}, SID: ${data.sid}, Room: ${roomName}`,
+    )
+
+    // 检查是否有任何套接字连接
+    const allSockets = await this.webGateway.getAllSockets()
+    this.logger.debug(`Total connected sockets: ${allSockets.length}`)
+    this.logger.debug(`Socket IDs: ${allSockets.map((s) => s.id).join(', ')}`)
+
+    // 直接创建 presence 数据，无需验证或查找特定套接字
     const presenceData: ActivityPresence = {
       ...data,
-
       operationTime: data.ts,
       updatedAt: Date.now(),
-      connectedAt: +new Date(socket.handshake.time),
+      connectedAt: Date.now(), // 使用当前时间作为连接时间
       readerId: data.readerId,
       ip,
     }
 
     Reflect.deleteProperty(presenceData, 'ts')
     const serializedPresenceData = omit(presenceData, 'ip')
+
+    // 如果有读者 ID，添加读者信息
     if (data.readerId) {
       const reader = await this.readerService.findReaderInIds([data.readerId])
       if (reader.length) {
@@ -415,22 +433,28 @@ export class ActivityService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    const roomJoinedAtMap =
-      await this.webGateway.getSocketRoomJoinedAtMap(socket)
+    // 设置默认的加入时间
+    Reflect.set(serializedPresenceData, 'joinedAt', Date.now())
 
-    Reflect.set(serializedPresenceData, 'joinedAt', roomJoinedAtMap[roomName])
-
+    // 直接广播给所有人，不通过房间广播
+    this.logger.debug(`Broadcasting presence update to all connected clients`)
     this.webGateway.broadcast(
       BusinessEvents.ACTIVITY_UPDATE_PRESENCE,
       serializedPresenceData,
-      {
-        rooms: [roomName],
-      },
     )
 
-    await this.gatewayService.setSocketMetadata(socket, {
-      presence: presenceData,
-    })
+    // 如果有连接的套接字，存储元数据
+    if (allSockets.length > 0) {
+      try {
+        const socket = allSockets[0]
+        // 存储元数据
+        await this.gatewayService.setSocketMetadata(socket, {
+          presence: presenceData,
+        })
+      } catch (error) {
+        this.logger.error(`Error setting socket metadata: ${error.message}`)
+      }
+    }
 
     return serializedPresenceData
   }

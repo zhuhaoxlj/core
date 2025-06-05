@@ -118,22 +118,62 @@ export class WebEventsGateway
   ) {
     const { payload, type } = data
 
-    // logger.debug('Received message', { type, payload })
+    console.log(
+      `[WebEventsGateway] Received message: type=${type}, payload=`,
+      payload,
+    )
 
     switch (type) {
       case SupportedMessageEvent.Join: {
         const { roomName } = payload as { roomName: string }
         if (roomName) {
-          socket.join(roomName)
-          this.hooks.onJoinRoom.forEach((fn) => fn(socket, roomName))
+          console.log(
+            `[WebEventsGateway] Socket ${socket.id} joining room: ${roomName}`,
+          )
 
-          const roomJoinedAtMap = await this.getSocketRoomJoinedAtMap(socket)
+          try {
+            // 确保 join 操作完成
+            await socket.join(roomName)
+            console.log(
+              `[WebEventsGateway] Socket ${socket.id} successfully joined room: ${roomName}`,
+            )
 
-          roomJoinedAtMap[roomName] = Date.now()
+            // 直接从 socket 获取房间信息
+            console.log(
+              `[WebEventsGateway] Socket rooms after join:`,
+              Array.from(socket.rooms),
+            )
 
-          await this.gatewayService.setSocketMetadata(socket, {
-            roomJoinedAtMap,
-          })
+            this.hooks.onJoinRoom.forEach((fn) => fn(socket, roomName))
+
+            const roomJoinedAtMap = await this.getSocketRoomJoinedAtMap(socket)
+
+            roomJoinedAtMap[roomName] = Date.now()
+
+            await this.gatewayService.setSocketMetadata(socket, {
+              roomJoinedAtMap,
+            })
+
+            // 打印所有房间信息，验证加入成功
+            const allRooms = await this.getAllRooms()
+            console.log(
+              `[WebEventsGateway] All rooms after join: ${Object.keys(allRooms).join(', ')}`,
+            )
+            console.log(
+              `[WebEventsGateway] Room details: ${JSON.stringify(
+                Object.entries(allRooms).map(([room, sockets]) => ({
+                  room,
+                  socketCount: sockets.length,
+                  socketIds: sockets.map((s) => s.id),
+                })),
+              )}`,
+            )
+          } catch (error) {
+            console.error(
+              `[WebEventsGateway] Error joining room ${roomName}:`,
+              error,
+            )
+          }
         }
         break
       }
@@ -273,10 +313,23 @@ export class WebEventsGateway
   // }
   public async getAllRooms() {
     const sockets = await this.namespace.fetchSockets()
+    console.log(
+      `[WebEventsGateway] getAllRooms: Found ${sockets.length} sockets`,
+    )
+
+    // 遍历所有套接字，打印其ID和房间信息
+    for (const socket of sockets) {
+      console.log(
+        `[WebEventsGateway] Socket ${socket.id} rooms:`,
+        Array.from(socket.rooms),
+      )
+    }
+
     const roomToSocketsMap = {} as Record<string, (typeof sockets)[number][]>
     for (const socket of sockets) {
       socket.rooms.forEach((roomName) => {
-        if (roomName === socket.id) return
+        // 不过滤掉任何房间，包括与套接字ID相同的房间
+        // if (roomName === socket.id) return
 
         if (!roomToSocketsMap[roomName]) {
           roomToSocketsMap[roomName] = []
@@ -284,6 +337,16 @@ export class WebEventsGateway
         roomToSocketsMap[roomName].push(socket)
       })
     }
+
+    console.log(
+      `[WebEventsGateway] getAllRooms: Returning ${Object.keys(roomToSocketsMap).length} rooms`,
+    )
+    if (Object.keys(roomToSocketsMap).length === 0) {
+      console.log(
+        `[WebEventsGateway] WARNING: No rooms found, this might be a bug!`,
+      )
+    }
+
     return roomToSocketsMap
   }
 
@@ -293,5 +356,13 @@ export class WebEventsGateway
       {}
 
     return roomJoinedAtMap
+  }
+
+  /**
+   * 获取所有已连接的套接字
+   * @returns 所有已连接的套接字列表
+   */
+  public async getAllSockets() {
+    return this.namespace.fetchSockets()
   }
 }
