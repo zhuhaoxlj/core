@@ -16,6 +16,7 @@ import { transformDataToPaginate } from '~/transformers/paginate.transformer'
 import { md5 } from '~/utils/tool.util'
 
 import { ConfigsService } from '../../configs/configs.service'
+import { PostService } from '../../post/post.service'
 import { DEFAULT_SUMMARY_LANG, LANGUAGE_CODE_TO_NAME } from '../ai.constants'
 import { AiService } from '../ai.service'
 import { AISummaryModel } from './ai-summary.model'
@@ -28,9 +29,9 @@ export class AiSummaryService {
     private readonly aiSummaryModel: MongooseModel<AISummaryModel>,
     private readonly databaseService: DatabaseService,
     private readonly configService: ConfigsService,
-
     private readonly redisService: RedisService,
     private readonly aiService: AiService,
+    private readonly postService: PostService,
   ) {
     this.logger = new Logger(AiSummaryService.name)
   }
@@ -148,6 +149,16 @@ export class AiSummaryService {
           refId: id,
           summary,
         })
+
+        // 如果是文章类型，自动更新文章的summary字段
+        if (article && article.type === CollectionRefTypes.Post) {
+          try {
+            await this.postService.updateById(id, { summary })
+            this.logger.log(`Updated post summary for article ${id}`)
+          } catch (error) {
+            this.logger.error(`Failed to update post summary: ${error.message}`)
+          }
+        }
 
         return doc
       }
@@ -287,9 +298,12 @@ export class AiSummaryService {
       .get('ai')
       .then((c) => c.aiSummaryTargetLanguage)
 
-    await this.generateSummaryByOpenAI(
+    const aiSummary = await this.generateSummaryByOpenAI(
       event.id,
       targetLanguage === 'auto' ? DEFAULT_SUMMARY_LANG : targetLanguage,
     )
+
+    // 不需要再次更新，因为已经在generateSummaryByOpenAI方法中更新了
+    return aiSummary
   }
 }

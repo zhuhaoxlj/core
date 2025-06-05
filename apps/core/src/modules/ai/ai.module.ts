@@ -1,6 +1,7 @@
 import { forwardRef, Module } from '@nestjs/common'
 
 import { McpModule } from '../mcp/mcp.module'
+import { PostModule } from '../post/post.module'
 import { AIAgentService } from './ai-agent/ai-agent.service'
 import { AiDeepReadingController } from './ai-deep-reading/ai-deep-reading.controller'
 import { AiDeepReadingService } from './ai-deep-reading/ai-deep-reading.service'
@@ -11,7 +12,7 @@ import { AiWriterService } from './ai-writer/ai-writer.service'
 import { AiService } from './ai.service'
 
 @Module({
-  imports: [forwardRef(() => McpModule)],
+  imports: [forwardRef(() => McpModule), forwardRef(() => PostModule)],
   providers: [
     AiSummaryService,
     AiService,
