@@ -365,46 +365,9 @@ export class ActivityService implements OnModuleInit, OnModuleDestroy {
   }
 
   async updatePresence(data: UpdatePresenceDto, ip: string) {
-    const roomName = data.roomName
-    const allRooms = await this.webGateway.getAllRooms()
-
-    // 直接创建模拟的房间信息，这样即使房间不存在也能广播消息
-    const simulatedRooms = {
-      [roomName]: [],
-    }
-
-    this.logger.debug(
-      `Available rooms: ${Object.keys(allRooms).length > 0 ? Object.keys(allRooms).join(', ') : Object.keys(simulatedRooms).join(', ')}`,
-    )
-    this.logger.debug(
-      `Room details: ${
-        Object.keys(allRooms).length > 0
-          ? JSON.stringify(
-              Object.entries(allRooms).map(([room, sockets]) => ({
-                room,
-                socketCount: sockets.length,
-                socketIds: sockets.map((s) => s.id),
-              })),
-            )
-          : JSON.stringify([
-              {
-                room: roomName,
-                socketCount: 0,
-                socketIds: [],
-              },
-            ])
-      }`,
-    )
-
-    // 添加更多诊断日志
-    this.logger.debug(
-      `Client connected: ${data.identity}, SID: ${data.sid}, Room: ${roomName}`,
-    )
-
+    this.logger.debug(`更新presence数据: ${JSON.stringify(data)}`)
     // 检查是否有任何套接字连接
     const allSockets = await this.webGateway.getAllSockets()
-    this.logger.debug(`Total connected sockets: ${allSockets.length}`)
-    this.logger.debug(`Socket IDs: ${allSockets.map((s) => s.id).join(', ')}`)
 
     // 直接创建 presence 数据，无需验证或查找特定套接字
     const presenceData: ActivityPresence = {
@@ -418,6 +381,7 @@ export class ActivityService implements OnModuleInit, OnModuleDestroy {
 
     Reflect.deleteProperty(presenceData, 'ts')
     const serializedPresenceData = omit(presenceData, 'ip')
+    this.logger.debug(`序列化数据: ${JSON.stringify(serializedPresenceData)}`)
 
     // 如果有读者 ID，添加读者信息
     if (data.readerId) {

@@ -28,6 +28,16 @@ export class UpdatePresenceDto {
   @MaxLength(50)
   displayName?: string
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  title?: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  artist?: string
+
   @IsString()
   @MaxLength(30)
   sid: string
